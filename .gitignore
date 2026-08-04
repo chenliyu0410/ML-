@@ -8,6 +8,11 @@ data/interim/**
 data/processed/**
 !data/**/.gitkeep
 
+# 例外：下載紀錄要進版控。
+# 資料本身是人工下載的（兩個官方系統都有驗證碼），別人拿到 repo
+# 只能靠這份 MANIFEST 知道該下載什麼、以及數字是怎麼來的。
+!data/raw/MANIFEST.md
+
 *.csv
 *.tsv
 *.xls

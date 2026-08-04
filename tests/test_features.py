@@ -63,6 +63,19 @@ def test_share_sums_to_one_per_month(panel):
     assert totals.round(6).eq(1.0).all()
 
 
+def test_regulatory_flag_marks_only_restricted(panel):
+    """MP1 管制旗標只能標到受管制的來源國。
+
+    誤標會讓沒受管制的國家被排除在採購建議之外；漏標則會讓中國的
+    低進口量被讀成市場偏好，而不是法規限制。
+    """
+    panel.loc[panel.country == "JPN", "country"] = "中國大陸"
+    out = bf.add_regulatory_flags(panel, ["中國大陸"])
+
+    assert out.loc[out.country == "中國大陸", "is_regulated_source"].eq(1).all()
+    assert out.loc[out.country == "USA", "is_regulated_source"].eq(0).all()
+
+
 def test_growth_no_inf_on_zero_months(panel):
     """補 0 的月份不可產生 inf —— inf 流進模型會讓訓練直接爆掉。"""
     panel.loc[panel.index[0], "unit_price"] = 0.0

@@ -118,6 +118,30 @@ def add_market_structure(df: pd.DataFrame, value_col: str = "value_usd") -> pd.D
     return df
 
 
+def add_regulatory_flags(
+    df: pd.DataFrame,
+    restricted_countries: list[str],
+    flag_col: str = "is_regulated_source",
+) -> pd.DataFrame:
+    """標記受法規管制的來源國（MP1）。
+
+    中國大陸僅開放「乾狗糧（牛肉口味）」一項，進口量天生受管制壓抑。
+    這是結構性因素，不是市場偏好。
+
+    這個 flag 有兩個用途：
+      1. 當特徵，讓模型知道這些序列受外生限制
+      2. 解讀時的護欄 —— 特徵重要度若顯示 country=中國大陸 很重要，
+         要先確認模型是在學管制，而不是在學消費者偏好
+
+    分群時建議依 params.regulatory.exclude_from_clustering 排除這些來源：
+    把受管制國家放進「低價衰退」象限並建議「不值得採購」，
+    那個建議建立在錯誤的因果上。
+    """
+    df = df.copy()
+    df[flag_col] = df["country"].isin(restricted_countries).astype(int)
+    return df
+
+
 def add_external(df: pd.DataFrame, external: pd.DataFrame) -> pd.DataFrame:
     """併入外部變數：USD/TWD 匯率、CPI、玉米/雞肉價格、SCFI 運價。
 
@@ -143,4 +167,8 @@ def build(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     df = add_growth(df, target_cols)
     df = add_seasonal(df, cyclical=f["seasonal"]["cyclical_encoding"])
     df = add_market_structure(df)
+
+    if f["event_dummies"].get("mp1_regulated"):
+        reg = cfg["regulatory"]
+        df = add_regulatory_flags(df, reg["mp1_restricted_countries"], reg["mp1_flag_col"])
     return df

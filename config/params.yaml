@@ -4,30 +4,86 @@
 # =====================================================================
 
 data:
-  start_ym: "2015-01"
+  # 105 年（2016）起採一般貿易制度，103–104 年為回溯資料，口徑不同。
+  # 為了序列一致性，起點設在 2016-01 而非 2015-01。
+  start_ym: "2016-01"
   end_ym: null                 # null = 抓到最新可得月份
+  start_ym_rationale: 民國105年起貿易制度口徑一致，更早期不可比
+
   panel_keys: [ym, hs_code, country]
   value_col: value_usd
   weight_col: weight_kg
 
+  # 兩種幣別都下載，可直接做匯率效果的交叉驗證
+  currencies_downloaded: [USD, TWD]
+
+# ---------------------------------------------------------------------
+# 資料取得 — 人工下載，非爬蟲
+# 兩個官方系統皆有驗證碼，已實測確認無法自動化。詳見 docs/download_sop.md
+# ---------------------------------------------------------------------
+ingest:
+  mode: manual_download
+  primary_channel: A           # A=關港貿單一窗口（可輸出 CSV）
+  verify_channel: B            # B=國際貿易署貿易統計網（有官方平均單價可對帳）
+  raw_pattern: "import_*.csv"  # 逐年一檔：import_2016.csv ... import_2025.csv
+  encoding_candidates: [utf-8-sig, cp950, big5]   # 政府 CSV 常見編碼，逐一嘗試
+  manifest: data/raw/MANIFEST.md                  # 每次下載的來源與設定紀錄
+
 clean:
+  # ── 復運：很多人漏掉的陷阱 ───────────────────────────────
+  # 國貨出口後退回也算進口。分析「台灣市場對寵物食品的需求」時必須扣除，
+  # 否則會高估。管道 A 下載的是「含復進口」，在這裡扣掉。
+  exclude_reimport: true
+  reimport_col: reimport_value_usd
+
   # 某月某國沒有進口 → 補 0 而非 NaN，否則 lag 特徵會斷裂
   fill_missing_with_zero: true
+
   # 交易月數低於門檻的「國家 × 品項」組合，併入 other 或剔除
   min_active_months: 24
   sparse_strategy: merge_to_other   # merge_to_other | drop | keep
+
   # 離群值只標記不刪除 —— 可能是轉口或報關異常，先查原因
   outlier_method: iqr
   outlier_iqr_k: 3.0
   outlier_action: flag              # flag | winsorize | drop
+
   country_name_map: config/country_map.yaml
+
+# ---------------------------------------------------------------------
+# 對帳 — Phase 0 的品質關卡，只做一次卻能擋掉最致命的錯誤
+# ---------------------------------------------------------------------
+reconcile:
+  enabled: true
+  # 管道 B 有內建「平均單價(重量)」報表，官方已經算好 USD/kg。
+  # 拿它跟自己算的 value_usd / weight_kg 對照。
+  reference_file: data/raw/channel_b_unit_price.xls
+  tolerance_pct: 1.0
+  fail_action: raise                # 對不起來就停，不要帶著錯的口徑往下跑
+  common_causes:
+    - 復進口沒扣除
+    - 幣別搞混（USD vs TWD）
+    - 重量單位搞混（公噸 vs 公斤）
+    - 稅號範圍不一致（漏抓 4205）
 
 deflate:
   # 實質單價 = 名目單價 / 指數 * 100
   index: IPI                        # IPI | CPI
   base_period: "2021-01"
-  # 同時以 USD 與 TWD 計價交叉驗證匯率效果
   currencies: [USD, TWD]
+  # 海關實際使用匯率比央行牌價更貼合報關實務
+  fx_source: 貿易統計網 FSC3070I 各月海關實際使用匯率
+
+# ---------------------------------------------------------------------
+# 法規管制 — 結構性因素，不是市場偏好
+# ---------------------------------------------------------------------
+regulatory:
+  # MP1：中國大陸僅開放「乾狗糧（牛肉口味）」一項。
+  # 中國的低進口量是法規造成的，不是消費者不愛。建模與解讀都要區隔。
+  mp1_restricted_countries: [中國大陸]
+  mp1_flag_col: is_regulated_source
+  exclude_from_clustering: true     # 受管制來源不進採購建議的分群
+  note: 特徵重要度若顯示 country=中國大陸 重要，要先確認不是在學管制而非偏好
 
 features:
   lags: [1, 2, 3, 6, 12]
@@ -47,6 +103,7 @@ features:
   event_dummies:
     covid: ["2020-01", "2022-12"]
     hs_revision: [2017, 2022]
+    mp1_regulated: true             # 由 regulatory.mp1_restricted_countries 展開
 
 split:
   # 時間序列絕對不能隨機切分 —— 那等於用未來預測過去
@@ -107,3 +164,4 @@ paths:
   processed: data/processed
   models: models
   figures: reports/figures
+  docs: docs
