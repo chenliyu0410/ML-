@@ -1,0 +1,29 @@
+# 統一換行：repo 內一律 LF，checkout 時交給 Git 依平台處理
+* text=auto eol=lf
+
+# Windows 批次檔維持 CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# 純文字，明確標記
+*.py     text diff=python
+*.md     text
+*.yaml   text
+*.yml    text
+*.txt    text
+*.cfg    text
+*.toml   text
+
+# Notebook 當文字處理，但不做行內 diff（雜訊太多）
+*.ipynb  text -diff
+
+# 二進位，不做 diff / 不轉換換行
+*.pkl     binary
+*.joblib  binary
+*.parquet binary
+*.feather binary
+*.xlsx    binary
+*.xls     binary
+*.png     binary
+*.jpg     binary
+*.pdf     binary

@@ -1,0 +1,109 @@
+# =====================================================================
+# 模型與流程參數
+# 所有 magic number 集中在此，程式碼裡不要寫死。
+# =====================================================================
+
+data:
+  start_ym: "2015-01"
+  end_ym: null                 # null = 抓到最新可得月份
+  panel_keys: [ym, hs_code, country]
+  value_col: value_usd
+  weight_col: weight_kg
+
+clean:
+  # 某月某國沒有進口 → 補 0 而非 NaN，否則 lag 特徵會斷裂
+  fill_missing_with_zero: true
+  # 交易月數低於門檻的「國家 × 品項」組合，併入 other 或剔除
+  min_active_months: 24
+  sparse_strategy: merge_to_other   # merge_to_other | drop | keep
+  # 離群值只標記不刪除 —— 可能是轉口或報關異常，先查原因
+  outlier_method: iqr
+  outlier_iqr_k: 3.0
+  outlier_action: flag              # flag | winsorize | drop
+  country_name_map: config/country_map.yaml
+
+deflate:
+  # 實質單價 = 名目單價 / 指數 * 100
+  index: IPI                        # IPI | CPI
+  base_period: "2021-01"
+  # 同時以 USD 與 TWD 計價交叉驗證匯率效果
+  currencies: [USD, TWD]
+
+features:
+  lags: [1, 2, 3, 6, 12]
+  rolling_windows: [3, 6, 12]
+  rolling_stats: [mean, std]
+  growth: [mom, yoy, cagr_12]
+  seasonal:
+    month_dummy: true
+    cyclical_encoding: true         # month 的 sin/cos 編碼
+  market_structure: [share, share_delta, hhi]
+  categorical_encoding: native      # native(LightGBM) | target
+  external:
+    fx_usd_twd: true
+    cpi: true
+    commodity: [corn, chicken]
+    freight: [SCFI]
+  event_dummies:
+    covid: ["2020-01", "2022-12"]
+    hs_revision: [2017, 2022]
+
+split:
+  # 時間序列絕對不能隨機切分 —— 那等於用未來預測過去
+  method: TimeSeriesSplit
+  n_splits: 5
+  # 最後 N 個月完全保留，全程不碰，最終只評估一次
+  holdout_months: 12
+  forecast_horizon: 12              # 預測未來 12 個月（目標 12–24）
+
+models:
+  baseline:
+    - naive                         # 預測值 = 上期值
+    - seasonal_naive                # 預測值 = 去年同月值 ← 很難打敗
+  sarima:
+    order: [1, 1, 1]
+    seasonal_order: [1, 1, 1, 12]
+  prophet:
+    yearly_seasonality: true
+    weekly_seasonality: false
+    daily_seasonality: false
+  lightgbm:
+    objective: regression_l1        # 對離群值較穩健
+    metric: mae
+    learning_rate: 0.05
+    num_leaves: 31
+    min_data_in_leaf: 20
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+    n_estimators: 2000
+    early_stopping_rounds: 100
+    seed: 42
+
+evaluate:
+  # MAPE 在實際值接近 0 時會爆炸，稀疏序列改用 sMAPE / MASE
+  metrics: [mae, rmse, smape, mase]
+  # 所有模型一律報告「相對 baseline 的改善率」
+  compare_against: seasonal_naive
+
+cluster:
+  features:
+    - unit_price_level
+    - unit_price_cagr
+    - volume_cagr
+    - share
+    - share_delta
+    - volatility
+    - hhi
+  scale: true                       # K-Means 靠距離，標準化必做
+  pca_variance: 0.90
+  k_range: [2, 10]
+  k_selection: [elbow, silhouette]
+  seed: 42
+
+paths:
+  raw: data/raw
+  interim: data/interim
+  processed: data/processed
+  models: models
+  figures: reports/figures
