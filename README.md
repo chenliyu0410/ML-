@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![Status](https://img.shields.io/badge/status-WIP-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-
+#小專案測試
 ---
 
 ## ✅ 已確認的前提：精緻化確實發生
